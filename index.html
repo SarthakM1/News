@@ -58,7 +58,7 @@
     align-items:center;
     gap:2.5rem;
     padding:9px 0;
-    animation: scroll-left 32s linear infinite;
+    animation: scroll-left 75s linear infinite;
     font-family:'IBM Plex Mono', monospace;
     font-size:0.78rem;
     letter-spacing:0.02em;
@@ -387,6 +387,13 @@ const FEEDS = {
   ]
 };
 
+const QUOTES = [
+  { label: "Sensex", symbol: "^BSESN" },
+  { label: "Nifty 50", symbol: "^NSEI" },
+  { label: "Brent Crude", symbol: "BZ=F" },
+  { label: "USD/INR", symbol: "INR=X" }
+];
+
 const MAX_ITEMS_PER_DESK = 6;
 const CACHE_KEY = "ledgerAndLatencyCache_v1";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // refetch at most every 6 hours
@@ -492,6 +499,46 @@ async function loadDesk(deskName){
       blurb: cleanDesc + (cleanDesc.length === 220 ? "…" : ""),
       source: (item.author || new URL(item.link).hostname.replace("www.","")),
       link: item.link
+    };
+  });
+}
+
+/* ============================================================
+   LIVE QUOTES — Nifty/Sensex/Crude/USDINR via Yahoo Finance's public
+   chart endpoint, routed through a CORS proxy (browsers block direct
+   cross-origin calls to Yahoo). No API key needed.
+   ============================================================ */
+
+async function fetchQuote(symbol){
+  const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+  const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
+  const res = await fetch(proxied);
+  if (!res.ok) throw new Error("Quote request failed: " + symbol);
+  const data = await res.json();
+  const result = data.chart && data.chart.result && data.chart.result[0];
+  if (!result) throw new Error("No quote data: " + symbol);
+  const price = result.meta.regularMarketPrice;
+  const prevClose = result.meta.previousClose || result.meta.chartPreviousClose;
+  const change = price - prevClose;
+  const pct = (change / prevClose) * 100;
+  return { price, change, pct };
+}
+
+async function loadSnapshot(){
+  const results = await Promise.allSettled(QUOTES.map(q => fetchQuote(q.symbol)));
+  return QUOTES.map((q, i) => {
+    const r = results[i];
+    if (r.status !== "fulfilled"){
+      return { label: q.label, value: "—", change: "unavailable", dir: "neutral" };
+    }
+    const { price, pct } = r.value;
+    const dir = pct > 0.05 ? "up" : pct < -0.05 ? "down" : "neutral";
+    const decimals = Math.abs(price) < 10 ? 3 : 2;
+    return {
+      label: q.label,
+      value: price.toLocaleString("en-IN", { maximumFractionDigits: decimals }),
+      change: (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%",
+      dir
     };
   });
 }
@@ -608,14 +655,16 @@ async function loadEdition(force){
   renderSkeleton('tech-list', 4);
   renderSnapshot(SNAPSHOT_FALLBACK);
 
-  const [financeR, sectorR, techR] = await Promise.allSettled([
-    loadDesk('finance'), loadDesk('sector'), loadDesk('tech')
+  const [financeR, sectorR, techR, snapshotR] = await Promise.allSettled([
+    loadDesk('finance'), loadDesk('sector'), loadDesk('tech'), loadSnapshot()
   ]);
 
-  const finance = financeR.status === 'fulfilled' ? financeR.value : FALLBACK.finance;
-  const sector  = sectorR.status  === 'fulfilled' ? sectorR.value  : FALLBACK.sector;
-  const tech    = techR.status    === 'fulfilled' ? techR.value    : FALLBACK.tech;
+  const finance  = financeR.status  === 'fulfilled' ? financeR.value  : FALLBACK.finance;
+  const sector   = sectorR.status   === 'fulfilled' ? sectorR.value   : FALLBACK.sector;
+  const tech     = techR.status     === 'fulfilled' ? techR.value     : FALLBACK.tech;
+  const snapshot = snapshotR.status === 'fulfilled' ? snapshotR.value : SNAPSHOT_FALLBACK;
 
+  renderSnapshot(snapshot);
   renderList('finance-list', finance);
   renderList('sector-list', sector);
   renderList('tech-list', tech);
@@ -624,7 +673,7 @@ async function loadEdition(force){
   const allFailed = [financeR, sectorR, techR].every(r => r.status === 'rejected');
   setStatus(allFailed ? "live fetch failed — showing fallback" : "live · updated just now");
 
-  writeCache({ snapshot: SNAPSHOT_FALLBACK, finance, sector, tech });
+  writeCache({ snapshot, finance, sector, tech });
 }
 
 document.getElementById('refresh-btn').addEventListener('click', () => loadEdition(true));
