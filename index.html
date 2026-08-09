@@ -511,17 +511,31 @@ async function loadDesk(deskName){
 
 async function fetchQuote(symbol){
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
-  const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
-  const res = await fetch(proxied);
-  if (!res.ok) throw new Error("Quote request failed: " + symbol);
-  const data = await res.json();
-  const result = data.chart && data.chart.result && data.chart.result[0];
-  if (!result) throw new Error("No quote data: " + symbol);
-  const price = result.meta.regularMarketPrice;
-  const prevClose = result.meta.previousClose || result.meta.chartPreviousClose;
-  const change = price - prevClose;
-  const pct = (change / prevClose) * 100;
-  return { price, change, pct };
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(target)}`
+  ];
+
+  let lastError;
+  for (const proxied of proxies){
+    try{
+      const res = await fetch(proxied);
+      if (!res.ok) throw new Error("Quote request failed: " + symbol);
+      const data = await res.json();
+      const result = data.chart && data.chart.result && data.chart.result[0];
+      if (!result) throw new Error("No quote data: " + symbol);
+      const price = result.meta.regularMarketPrice;
+      const prevClose = result.meta.previousClose || result.meta.chartPreviousClose;
+      const change = price - prevClose;
+      const pct = (change / prevClose) * 100;
+      return { price, change, pct };
+    }catch(err){
+      lastError = err;
+      continue; // try next proxy
+    }
+  }
+  throw lastError || new Error("All proxies failed for " + symbol);
 }
 
 async function loadSnapshot(){
