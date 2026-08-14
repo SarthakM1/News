@@ -653,7 +653,6 @@ async function loadEdition(force){
   if (!force){
     const cached = readCache();
     if (cached){
-      renderSnapshot(cached.snapshot);
       renderList('finance-list', cached.finance);
       renderList('sector-list', cached.sector);
       renderList('tech-list', cached.tech);
@@ -667,32 +666,57 @@ async function loadEdition(force){
   renderSkeleton('finance-list', 4);
   renderSkeleton('sector-list', 4);
   renderSkeleton('tech-list', 4);
-  renderSnapshot(SNAPSHOT_FALLBACK);
 
-  const [financeR, sectorR, techR, snapshotR] = await Promise.allSettled([
-    loadDesk('finance'), loadDesk('sector'), loadDesk('tech'), loadSnapshot()
+  const [financeR, sectorR, techR] = await Promise.allSettled([
+    loadDesk('finance'), loadDesk('sector'), loadDesk('tech')
   ]);
 
   const finance  = financeR.status  === 'fulfilled' ? financeR.value  : FALLBACK.finance;
   const sector   = sectorR.status   === 'fulfilled' ? sectorR.value   : FALLBACK.sector;
   const tech     = techR.status     === 'fulfilled' ? techR.value     : FALLBACK.tech;
-  const snapshot = snapshotR.status === 'fulfilled' ? snapshotR.value : SNAPSHOT_FALLBACK;
 
-  renderSnapshot(snapshot);
   renderList('finance-list', finance);
   renderList('sector-list', sector);
   renderList('tech-list', tech);
   renderTicker([...finance, ...sector, ...tech].slice(0,10));
 
+  [financeR, sectorR, techR].forEach((r, i) => {
+    if (r.status === 'rejected') console.error('[Ledger & Latency] desk failed:', ['finance','sector','tech'][i], r.reason);
+  });
+
   const allFailed = [financeR, sectorR, techR].every(r => r.status === 'rejected');
   setStatus(allFailed ? "live fetch failed — showing fallback" : "live · updated just now");
 
-  writeCache({ snapshot, finance, sector, tech });
+  writeCache({ finance, sector, tech });
 }
 
-document.getElementById('refresh-btn').addEventListener('click', () => loadEdition(true));
+/* ============================================================
+   LIVE QUOTE REFRESH — decoupled from the news cache above so the
+   Nifty/Sensex strip updates independently and doesn't go stale.
+   Fetches immediately, then every 60 seconds while the tab is open.
+   ============================================================ */
+
+async function refreshSnapshot(){
+  renderSnapshot(SNAPSHOT_FALLBACK.map(s => ({ ...s, value: "…", change: "refreshing" })));
+  try{
+    const snapshot = await loadSnapshot();
+    renderSnapshot(snapshot);
+    const allDash = snapshot.every(s => s.value === "—");
+    if (allDash) console.error('[Ledger & Latency] all quote sources failed this cycle');
+  }catch(err){
+    console.error('[Ledger & Latency] snapshot refresh error:', err);
+    renderSnapshot(SNAPSHOT_FALLBACK);
+  }
+}
+
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  loadEdition(true);
+  refreshSnapshot();
+});
 
 loadEdition(false);
+refreshSnapshot();
+setInterval(refreshSnapshot, 60000);
 </script>
 
 </body>
