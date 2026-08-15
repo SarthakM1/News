@@ -250,6 +250,30 @@
     margin:0 0 10px;
   }
 
+  .stock-chip-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-bottom:8px;
+  }
+  .stock-chip{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.68rem;
+    font-weight:600;
+    padding:3px 9px;
+    border-radius:12px;
+    background:var(--ink);
+    color:var(--paper);
+  }
+  .why-line{
+    font-size:0.85rem;
+    font-style:italic;
+    color:var(--ink-soft);
+    margin:0 0 8px;
+    border-left:2px solid var(--rule);
+    padding-left:8px;
+  }
+
   .explainer{
     border-left:3px solid var(--gold);
     background:rgba(181,138,61,0.08);
@@ -300,6 +324,7 @@
     border:1px solid var(--rule);
     padding:18px;
     background:rgba(255,255,255,0.25);
+    min-width:0;
   }
   .gym-card h4{
     font-family:'Fraunces', serif;
@@ -350,6 +375,9 @@
     border:none;
     outline:none;
     padding:0;
+    width:100%;
+    min-width:0;
+    box-sizing:border-box;
   }
   .sudoku-cell.fixed{ background:var(--paper-dim); font-weight:700; color:var(--ink); }
   .sudoku-cell:nth-child(3n){ border-right:2px solid var(--ink); }
@@ -591,6 +619,40 @@ function isRecommendation(text){
   return RECOMMENDATION_WORDS.some(w => t.includes(w));
 }
 
+/* Known company names to spot inside recommendation articles. Matched as
+   whole words/phrases, case-insensitive. Not exhaustive — a lightweight
+   scan, not real NER. */
+const STOCK_NAMES = [
+  "Nilkamal","GreenPanel","Greenlam","Stylam","Greenply",
+  "Reliance","TCS","Infosys","HDFC Bank","ICICI Bank","SBI","State Bank of India",
+  "Tata Motors","Maruti","Adani","Wipro","Divi's Laboratories","Divi's Labs",
+  "Hindalco","ITC","Larsen","L&T","Axis Bank","Kotak Mahindra","Kotak Bank",
+  "Sun Pharma","ONGC","NTPC","Coal India","Power Grid","Bharti Airtel",
+  "Asian Paints","Berger Paints","Nestle India","Hindustan Unilever","HUL",
+  "Mahindra","JSW Steel","Tata Steel","UltraTech","Titan","Bajaj Auto",
+  "Bajaj Finance","Bajaj Finserv","Eicher Motors","Hero MotoCorp","Grasim",
+  "Dr Reddy's","Cipla","BPCL","IOC","Vedanta","DLF","Godrej","Pidilite",
+  "Dabur","Britannia","Bank of Baroda","PNB","Yes Bank","IndusInd Bank",
+  "Zomato","Paytm","Nykaa","TVS Motor","Shiprocket","Molbio Diagnostics",
+  "Behari Lal","Milky Mist","Ardee Industries","Hindustan Aeronautics","HAL"
+];
+
+function extractStockNames(text){
+  const found = [];
+  STOCK_NAMES.forEach(name => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('\\b' + escaped + '\\b', 'i');
+    if (re.test(text) && !found.includes(name)) found.push(name);
+  });
+  return found;
+}
+
+function extractWhyLine(headline, description){
+  const sentences = description.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const first = sentences[0] || headline;
+  return first.length > 140 ? first.slice(0,140) + "…" : first;
+}
+
 function guessDirection(text){
   const t = text.toLowerCase();
   if (DOWN_WORDS.some(w => t.includes(w))) return "down";
@@ -683,11 +745,14 @@ async function loadDesk(deskName){
     const cleanDesc = stripHtml(item.description).slice(0, 220);
     const combined = item.title + " " + cleanDesc;
     const tag = guessTag(deskName, combined);
+    const isRec = isRecommendation(combined);
     return {
       tag,
       dir: guessDirection(combined),
       priority: guessPriority(combined),
-      isRec: isRecommendation(combined),
+      isRec,
+      stocksMentioned: isRec ? extractStockNames(combined) : [],
+      whyLine: isRec ? extractWhyLine(item.title, cleanDesc) : "",
       time: timeAgo(item.pubDate),
       headline: item.title,
       blurb: cleanDesc + (cleanDesc.length === 220 ? "…" : ""),
@@ -803,6 +868,29 @@ function cardHtml(item){
   `;
 }
 
+function investCardHtml(item){
+  const priorityBadge = item.priority === "high"
+    ? `<span class="badge high">HIGH</span>`
+    : `<span class="badge med">MED</span>`;
+  const chips = item.stocksMentioned && item.stocksMentioned.length
+    ? `<div class="stock-chip-row">${item.stocksMentioned.map(s => `<span class="stock-chip">${s}</span>`).join('')}</div>`
+    : "";
+  const whyBlock = item.whyLine ? `<p class="why-line">${item.whyLine}</p>` : "";
+  return `
+    <article class="card">
+      <div class="card-top">
+        ${priorityBadge}
+        <span class="tag ${item.dir}">${item.tag}</span>
+        <span class="card-time">${item.time}</span>
+      </div>
+      <h3><a class="headline-link" href="${item.link}" target="_blank" rel="noopener">${item.headline}</a></h3>
+      ${chips}
+      ${whyBlock}
+      <div class="card-source">${item.source}</div>
+    </article>
+  `;
+}
+
 function renderList(containerId, items){
   const el = document.getElementById(containerId);
   if (!items.length){ el.innerHTML = `<div class="card">No headlines available right now.</div>`; return; }
@@ -878,7 +966,7 @@ function renderTopInvestments(){
     el.innerHTML = `<div class="card">No analyst-recommendation articles in today's feed yet — check back later or hit Refresh.</div>`;
     return;
   }
-  el.innerHTML = picks.map(cardHtml).join('');
+  el.innerHTML = picks.map(investCardHtml).join('');
 }
 
 async function loadEdition(force){
