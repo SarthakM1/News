@@ -596,7 +596,7 @@ const QUOTES = [
 
 const MAX_ITEMS_PER_DESK = 8;
 const CACHE_KEY = "ledgerAndLatencyCache_v2";
-const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
+const CACHE_TTL_MS = 1000 * 60 * 20; // refetch news at most every 20 minutes
 
 const FALLBACK = {
   finance: [{ tag:"MARKETS", dir:"neutral", priority:"med", time:"—", headline:"Live feed unavailable right now — check your connection or try Refresh.", blurb:"", explainer:"", source:"", link:"#" }],
@@ -1243,6 +1243,7 @@ renderTabs();
 loadEdition(false);
 refreshSnapshot();
 setInterval(refreshSnapshot, 60000);
+setInterval(() => loadEdition(true), CACHE_TTL_MS);
 
 document.getElementById('refresh-btn').addEventListener('click', () => { loadEdition(true); refreshSnapshot(); });
 
