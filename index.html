@@ -833,15 +833,31 @@ function renderQuoteBar(data){
   `).join('');
 }
 
+let lastGoodSnapshot = null;
+
 async function refreshSnapshot(){
-  renderQuoteBar(SNAPSHOT_FALLBACK.map(s => ({ ...s, value:"…", change:"refreshing" })));
+  // Only show the loading placeholder on the very first load — once we
+  // have real data, keep showing it while a refresh happens in the background.
+  if (!lastGoodSnapshot){
+    renderQuoteBar(SNAPSHOT_FALLBACK.map(s => ({ ...s, value:"…", change:"refreshing" })));
+  }
   try{
     const snapshot = await loadSnapshot();
-    renderQuoteBar(snapshot);
-    if (snapshot.every(s => s.value === "—")) console.error('[Ledger & Latency] all quote sources failed this cycle');
+    const allFailed = snapshot.every(s => s.value === "—");
+    if (allFailed){
+      console.error('[Ledger & Latency] all quote sources failed this cycle');
+      renderQuoteBar(lastGoodSnapshot || SNAPSHOT_FALLBACK);
+    } else {
+      // Per-symbol: keep any previously-good value if this cycle's fetch for it failed.
+      const merged = lastGoodSnapshot
+        ? snapshot.map((s, i) => s.value === "—" ? lastGoodSnapshot[i] : s)
+        : snapshot;
+      lastGoodSnapshot = merged;
+      renderQuoteBar(merged);
+    }
   }catch(err){
     console.error('[Ledger & Latency] snapshot refresh error:', err);
-    renderQuoteBar(SNAPSHOT_FALLBACK);
+    renderQuoteBar(lastGoodSnapshot || SNAPSHOT_FALLBACK);
   }
 }
 
