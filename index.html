@@ -557,7 +557,7 @@
   </div>
 
   <footer>
-    <span id="edition-label">No. 001 — Personal edition, built by Sarthak</span>
+    <span id="edition-label">No. 001 — Personal edition, built for Sarthak</span>
     <button id="refresh-btn">↻ Refresh now</button>
   </footer>
 
@@ -722,11 +722,23 @@ function stripHtml(html){
   return (div.textContent || div.innerText || "").trim();
 }
 
+/* Fetch with a hard timeout — public CORS proxies sometimes hang instead
+   of failing cleanly, which without this would stall the whole chain. */
+async function fetchWithTimeout(url, ms = 8000){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try{
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchFeed(url){
   const encoded = encodeURIComponent(url);
   const keyParam = RSS2JSON_API_KEY ? ("&api_key=" + RSS2JSON_API_KEY) : "";
   const api = `https://api.rss2json.com/v1/api.json?rss_url=${encoded}${keyParam}`;
-  const res = await fetch(api);
+  const res = await fetchWithTimeout(api, 10000);
   if (!res.ok) throw new Error("Feed request failed: " + url);
   const data = await res.json();
   if (data.status !== "ok") throw new Error("Feed parse failed: " + url);
@@ -771,14 +783,14 @@ async function loadDesk(deskName){
 async function fetchQuote(symbol){
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
   const proxies = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
     `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(target)}`
+    `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`
   ];
   let lastError;
   for (const proxied of proxies){
     try{
-      const res = await fetch(proxied);
+      const res = await fetchWithTimeout(proxied, 6000);
       if (!res.ok) throw new Error("Quote request failed: " + symbol);
       const data = await res.json();
       const result = data.chart && data.chart.result && data.chart.result[0];
