@@ -780,8 +780,29 @@ async function loadDesk(deskName){
    LIVE QUOTES
    ============================================================ */
 
+// Your own Cloudflare Worker — reliable, no third-party CORS proxy needed.
+const OWN_PROXY_URL = "https://still-violet-fa9c.sarthak-mahajan251.workers.dev";
+
 async function fetchQuote(symbol){
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+
+  // Try your own Worker first — it's the reliable path.
+  try{
+    const res = await fetchWithTimeout(`${OWN_PROXY_URL}/?symbol=${encodeURIComponent(symbol)}`, 6000);
+    if (res.ok){
+      const data = await res.json();
+      const result = data.chart && data.chart.result && data.chart.result[0];
+      if (result){
+        const price = result.meta.regularMarketPrice;
+        const prevClose = result.meta.previousClose || result.meta.chartPreviousClose;
+        const change = price - prevClose;
+        const pct = (change / prevClose) * 100;
+        return { price, change, pct };
+      }
+    }
+  }catch(err){ console.error('[Ledger & Latency] own proxy failed, falling back:', symbol, err); }
+
+  // Fallback chain — only used if your own Worker is down.
   const proxies = [
     `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
     `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
