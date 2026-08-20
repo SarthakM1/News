@@ -133,7 +133,10 @@
     display:flex;
     gap:4px;
     overflow-x:auto;
+    -ms-overflow-style:none;
+    scrollbar-width:none;
   }
+  .tabs-wrap::-webkit-scrollbar{ display:none; }
   .tab-btn{
     font-family:'IBM Plex Mono', monospace;
     font-size:0.72rem;
